@@ -36,7 +36,7 @@ async function startServer() {
       res.status(200).json({ status: 'ok' });
     });
 
-    const PORT = process.env.PORT || 4000;
+    const PORT = process.env.PORT || 4005;
     await new Promise<void>(resolve => {
       httpServer.listen({ port: PORT }, resolve);
     });
