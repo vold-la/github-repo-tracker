@@ -17,11 +17,15 @@ export const Header = styled(Box)(({ theme }) => ({
     backgroundColor: theme.palette.background.paper,
   }));
   
-export const ContentContainer = styled(Box)({
+export const ContentContainer = styled(Box)(({ theme }) => ({
     display: 'flex',
     flex: 1,
     overflow: 'hidden',
-  });
+    [theme.breakpoints.down('md')]: {
+      flexDirection: 'column',
+      overflow: 'auto',
+    },
+  }));
   
 export const LeftPanel = styled(Paper)(({ theme }) => ({
     width: '400px',
@@ -30,6 +34,11 @@ export const LeftPanel = styled(Paper)(({ theme }) => ({
     borderRadius: 0,
     borderRight: `1px solid ${theme.palette.divider}`,
     backgroundColor: theme.palette.background.paper,
+    [theme.breakpoints.down('md')]: {
+      width: '100%',
+      borderRight: 'none',
+      borderBottom: `1px solid ${theme.palette.divider}`,
+    },
   }));
   
 export const RightPanel = styled(Paper)(({ theme }) => ({
@@ -38,17 +47,24 @@ export const RightPanel = styled(Paper)(({ theme }) => ({
     padding: theme.spacing(4),
     overflowY: 'auto',
     backgroundColor: theme.palette.background.paper,
+    [theme.breakpoints.down('md')]: {
+      display: 'none',
+    },
   }));
   
 export const StyledListItemButton = styled(ListItemButton)<{ selected?: boolean }>(
     ({ theme, selected }) => ({
       borderLeft: '3px solid transparent',
+      margin: 0,
+      width: '100%',
       '&:hover': {
         backgroundColor: theme.palette.action.hover,
+        width: '100%',
       },
       ...(selected && {
         borderLeft: `3px solid ${theme.palette.primary.main}`,
         backgroundColor: theme.palette.action.selected,
+        width: '100%',
       }),
     })
   );
@@ -107,6 +123,18 @@ export const StyledTextField = styled(TextField)(({ theme }) => ({
     },
     '& .MuiInputBase-input': {
       padding: '12px 16px',
+      [theme.breakpoints.down('sm')]: {
+        padding: '12px 4px',
+      },
+    },
+    '& .MuiInputAdornment-root': {
+      [theme.breakpoints.down('sm')]: {
+        marginLeft: 0,
+        marginRight: 0,
+        '& .MuiSvgIcon-root': {
+          fontSize: '1.2rem',
+        },
+      },
     },
   }));
   

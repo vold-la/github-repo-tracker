@@ -106,3 +106,51 @@ export const ADD_REPOSITORY = gql`
     }
   }
 `;
+
+export const REFRESH_REPOSITORY = gql`
+  mutation RefreshRepository($id: ID!) {
+    refreshRepository(id: $id) {
+      id
+      name
+      owner
+      description
+      fullName
+      githubId
+      latestRelease {
+        id
+        version
+        name
+        description
+        releaseDate
+        githubId
+        seen
+        metadata {
+          htmlUrl
+          tarballUrl
+          zipballUrl
+          draft
+          prerelease
+        }
+      }
+      releases {
+        id
+        version
+        name
+        description
+        releaseDate
+        githubId
+        seen
+        metadata {
+          htmlUrl
+          tarballUrl
+          zipballUrl
+          draft
+          prerelease
+        }
+      }
+      createdAt
+      updatedAt
+      isArchived
+    }
+  }
+`;

@@ -28,7 +28,7 @@ import { useQuery, useMutation, gql } from '@apollo/client';
 import GitHubIcon from '@mui/icons-material/GitHub';
 import type { Components } from 'react-markdown';
 import { Release, Repository } from '../../types';
-import { ADD_REPOSITORY, GET_REPOSITORIES, MARK_RELEASE_AS_SEEN, REMOVE_REPOSITORY } from '../../graphql/repositoryQueries';
+import { ADD_REPOSITORY, GET_REPOSITORIES, MARK_RELEASE_AS_SEEN, REMOVE_REPOSITORY, REFRESH_REPOSITORY } from '../../graphql/repositoryQueries';
 import {
   Container,
   Header,
@@ -84,6 +84,7 @@ const RepositoryList: React.FC = () => {
   const [markAsSeen] = useMutation(MARK_RELEASE_AS_SEEN);
   const [deleteRepository] = useMutation(REMOVE_REPOSITORY);
   const [addRepository] = useMutation(ADD_REPOSITORY);
+  const [refreshRepository] = useMutation(REFRESH_REPOSITORY);
 
   const repoInputRef = React.useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -220,6 +221,9 @@ const RepositoryList: React.FC = () => {
   const handleMarkAsSeen = async (releaseId: string, seen: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
+      const release = selectedRepo?.releases?.find(r => r.id === releaseId) || selectedRepo?.latestRelease;
+      if (!release) return;
+
       await markAsSeen({
         variables: { releaseId, seen },
         optimisticResponse: {
@@ -227,23 +231,46 @@ const RepositoryList: React.FC = () => {
             __typename: 'Release',
             id: releaseId,
             seen: seen,
-            version: '',
-            name: '',
-            description: '',
-            releaseDate: '',
-            githubId: '',
+            version: release.version || '',
+            name: release.name || release.version || '',
+            description: release.description || '',
+            releaseDate: release.releaseDate || '',
+            githubId: release.githubId || '',
             metadata: {
               __typename: 'ReleaseMetadata',
-              htmlUrl: '',
-              tarballUrl: null,
-              zipballUrl: null,
-              draft: false,
-              prerelease: false,
+              htmlUrl: release.metadata?.htmlUrl || '',
+              tarballUrl: release.metadata?.tarballUrl || null,
+              zipballUrl: release.metadata?.zipballUrl || null,
+              draft: release.metadata?.draft || false,
+              prerelease: release.metadata?.prerelease || false,
             },
           },
         },
         update: (cache, { data }) => {
           if (!data?.markReleaseAsSeen) return;
+
+          cache.writeFragment({
+            id: cache.identify({ __typename: 'Release', id: releaseId }),
+            fragment: gql`
+              fragment UpdatedRelease on Release {
+                id
+                seen
+                version
+                name
+                description
+                releaseDate
+                githubId
+                metadata {
+                  htmlUrl
+                  tarballUrl
+                  zipballUrl
+                  draft
+                  prerelease
+                }
+              }
+            `,
+            data: data.markReleaseAsSeen,
+          });
 
           cache.modify({
             fields: {
@@ -257,10 +284,34 @@ const RepositoryList: React.FC = () => {
                         latestRelease {
                           id
                           seen
+                          version
+                          name
+                          description
+                          releaseDate
+                          githubId
+                          metadata {
+                            htmlUrl
+                            tarballUrl
+                            zipballUrl
+                            draft
+                            prerelease
+                          }
                         }
                         releases {
                           id
                           seen
+                          version
+                          name
+                          description
+                          releaseDate
+                          githubId
+                          metadata {
+                            htmlUrl
+                            tarballUrl
+                            zipballUrl
+                            draft
+                            prerelease
+                          }
                         }
                       }
                     `,
@@ -299,7 +350,7 @@ const RepositoryList: React.FC = () => {
               prev
                 ? {
                     ...prev,
-                    seen: seen,
+                    ...data.markReleaseAsSeen,
                   }
                 : null
             );
@@ -312,6 +363,22 @@ const RepositoryList: React.FC = () => {
                 fragment FullRepository on Repository {
                   id
                   releases {
+                    id
+                    version
+                    name
+                    description
+                    releaseDate
+                    githubId
+                    seen
+                    metadata {
+                      htmlUrl
+                      tarballUrl
+                      zipballUrl
+                      draft
+                      prerelease
+                    }
+                  }
+                  latestRelease {
                     id
                     version
                     name
@@ -395,12 +462,86 @@ const RepositoryList: React.FC = () => {
 
   const handleRefreshRepository = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    await refetch();
-    setSnackbar({
-      open: true,
-      message: 'Repository refreshed',
-      severity: 'success',
-    });
+    try {
+      const repo = selectedRepo;
+      if (!repo) return;
+
+      await refreshRepository({
+        variables: { id: repo.id },
+        refetchQueries: [{ query: GET_REPOSITORIES }],
+        update: (cache, { data }) => {
+          if (data?.refreshRepository) {
+            const updatedRepo = {
+              ...data.refreshRepository,
+              __typename: 'Repository'
+            };
+
+            cache.writeFragment({
+              id: cache.identify({ __typename: 'Repository', id: repo.id }),
+              fragment: gql`
+                fragment RefreshedRepository on Repository {
+                  id
+                  name
+                  owner
+                  description
+                  isArchived
+                  latestRelease {
+                    id
+                    version
+                    name
+                    description
+                    releaseDate
+                    githubId
+                    seen
+                    metadata {
+                      htmlUrl
+                      tarballUrl
+                      zipballUrl
+                      draft
+                      prerelease
+                    }
+                  }
+                  releases {
+                    id
+                    version
+                    name
+                    description
+                    releaseDate
+                    githubId
+                    seen
+                    metadata {
+                      htmlUrl
+                      tarballUrl
+                      zipballUrl
+                      draft
+                      prerelease
+                    }
+                  }
+                }
+              `,
+              data: updatedRepo,
+            });
+
+            setSelectedRepo(updatedRepo);
+            if (updatedRepo.latestRelease) {
+              setSelectedRelease(updatedRepo.latestRelease);
+            }
+          }
+        }
+      });
+
+      setSnackbar({
+        open: true,
+        message: 'Repository refreshed from GitHub',
+        severity: 'success',
+      });
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: error instanceof Error ? error.message : 'Error refreshing repository',
+        severity: 'error',
+      });
+    }
   };
 
   const handleSort = (option: SortOption) => {
@@ -430,9 +571,12 @@ const RepositoryList: React.FC = () => {
   const renderReleaseHistory = (repo: Repository) => {
     if (!repo.releases || repo.releases.length === 0) return null;
 
-    const sortedReleases = [...repo.releases].sort(
-      (a, b) => new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime()
-    );
+    const sortedReleases = [...repo.releases].sort((a, b) => {
+      const dateA = new Date(a.releaseDate).getTime();
+      const dateB = new Date(b.releaseDate).getTime();
+      if (isNaN(dateA) || isNaN(dateB)) return 0;
+      return dateB - dateA;
+    });
 
     return (
       <Box>
@@ -671,66 +815,102 @@ const RepositoryList: React.FC = () => {
                 </Typography>
               </Box>
             ) : (
-              repositories.map(repo => (
-                <React.Fragment key={repo.id}>
-                  <ListItem id={`repo-${repo.id}`} disablePadding>
-                    <StyledListItemButton
-                      selected={selectedRepo?.id === repo.id}
-                      onClick={() => {
-                        setSelectedRepo(repo);
-                        setSelectedRelease(repo.latestRelease || null);
-                      }}
-                    >
-                      <ListItemText
-                        primary={
-                          <Box display="flex" alignItems="center" gap={1}>
-                            <Typography variant="body1" noWrap sx={{ flex: 1 }}>
-                              {highlightText(repo.name, searchQuery)}
-                            </Typography>
-                            {renderRepositoryButtons(repo)}
-                          </Box>
-                        }
-                        secondary={
-                          <Box>
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                              sx={{
-                                display: 'block',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {highlightText(repo.owner, searchQuery)}
-                              {repo.description && (
-                                <>
-                                  {' • '}
-                                  {highlightText(repo.description, searchQuery)}
-                                </>
+              repositories.map((repo, index) => {
+                const isSelected = selectedRepo?.id === repo.id;
+                return (
+                  <React.Fragment key={repo.id}>
+                    <ListItem id={`repo-${repo.id}`} disablePadding>
+                      <StyledListItemButton
+                        selected={isSelected}
+                        onClick={() => {
+                          setSelectedRepo(repo);
+                          setSelectedRelease(repo.latestRelease || null);
+                        }}
+                      >
+                        <ListItemText
+                          primary={
+                            <Box display="flex" alignItems="center" gap={1}>
+                              <Typography variant="body1" noWrap sx={{ flex: 1 }}>
+                                {highlightText(repo.name, searchQuery)}
+                              </Typography>
+                              {renderRepositoryButtons(repo)}
+                            </Box>
+                          }
+                          secondary={
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{
+                                  display: 'block',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {highlightText(repo.owner, searchQuery)}
+                                {repo.description && (
+                                  <>
+                                    {' • '}
+                                    {highlightText(repo.description, searchQuery)}
+                                  </>
+                                )}
+                              </Typography>
+                              {repo.latestRelease && (
+                                <Box display="flex" alignItems="center" gap={1} mt={0.5}>
+                                  <VersionChip
+                                    label={repo.latestRelease.version}
+                                    size="small"
+                                    variant="outlined"
+                                    color={repo.latestRelease.seen ? 'success' : 'warning'}
+                                  />
+                                  <Typography variant="caption" color="text.secondary">
+                                    {formatDate(repo.latestRelease.releaseDate)}
+                                  </Typography>
+                                </Box>
                               )}
+                            </Box>
+                          }
+                        />
+                      </StyledListItemButton>
+                    </ListItem>
+                    <Divider />
+                    {isSelected && window.innerWidth < theme.breakpoints.values.md && (
+                      <>
+                        <Box p={2} bgcolor="grey.50">
+                          <Box display="flex" flexDirection="column" gap={2}>
+                            <Typography variant="h6" gutterBottom>
+                              {repo.owner}/{repo.name}
                             </Typography>
-                            {repo.latestRelease && (
-                              <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                                <VersionChip
-                                  label={repo.latestRelease.version}
-                                  size="small"
-                                  variant="outlined"
-                                  color={repo.latestRelease.seen ? 'success' : 'warning'}
-                                />
-                                <Typography variant="caption" color="text.secondary">
-                                  {formatDate(repo.latestRelease.releaseDate)}
-                                </Typography>
-                              </Box>
+                            {repo.description && (
+                              <Typography variant="body2" color="text.secondary">
+                                {repo.description}
+                              </Typography>
+                            )}
+                            {renderReleaseHistory(repo)}
+                            {selectedRelease ? (
+                              renderReleaseDetails(selectedRelease)
+                            ) : repo.latestRelease ? (
+                              renderReleaseDetails(repo.latestRelease)
+                            ) : (
+                              <Alert
+                                severity="info"
+                                sx={{
+                                  borderRadius: 2,
+                                  backgroundColor: 'info.light' + '20',
+                                }}
+                              >
+                                No releases available for this repository.
+                              </Alert>
                             )}
                           </Box>
-                        }
-                      />
-                    </StyledListItemButton>
-                  </ListItem>
-                  <Divider />
-                </React.Fragment>
-              ))
+                        </Box>
+                        <Divider />
+                      </>
+                    )}
+                  </React.Fragment>
+                );
+              })
             )}
           </List>
         </LeftPanel>
