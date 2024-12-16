@@ -28,7 +28,13 @@ import { useQuery, useMutation, gql } from '@apollo/client';
 import GitHubIcon from '@mui/icons-material/GitHub';
 import type { Components } from 'react-markdown';
 import { Release, Repository } from '../../types';
-import { ADD_REPOSITORY, GET_REPOSITORIES, MARK_RELEASE_AS_SEEN, REMOVE_REPOSITORY, REFRESH_REPOSITORY } from '../../graphql/repositoryQueries';
+import {
+  ADD_REPOSITORY,
+  GET_REPOSITORIES,
+  MARK_RELEASE_AS_SEEN,
+  REMOVE_REPOSITORY,
+  REFRESH_REPOSITORY,
+} from '../../graphql/repositoryQueries';
 import {
   Container,
   Header,
@@ -41,13 +47,12 @@ import {
   AddButton,
   StyledIconButton,
   ReleaseHistoryButton,
-  StyledTextField
+  StyledTextField,
 } from './styles';
 import { FilterOption, SnackbarState, SortDirection, SortOption } from './types';
 import { formatDate } from '../../utils';
 import ReleaseDetails from './ReleaseDetails';
 import ActionButtons from './ActionButtons';
-
 
 const highlightText = (text: string, query: string) => {
   if (!query) return text;
@@ -58,7 +63,6 @@ const highlightText = (text: string, query: string) => {
     </HighlightedText>
   ));
 };
-
 
 const RepositoryList: React.FC = () => {
   const theme = useTheme();
@@ -78,9 +82,7 @@ const RepositoryList: React.FC = () => {
     severity: 'success',
   });
 
-  const { loading, error, data, refetch } = useQuery<{ repositories: Repository[] }>(
-    GET_REPOSITORIES
-  );
+  const { loading, error, data } = useQuery<{ repositories: Repository[] }>(GET_REPOSITORIES);
   const [markAsSeen] = useMutation(MARK_RELEASE_AS_SEEN);
   const [deleteRepository] = useMutation(REMOVE_REPOSITORY);
   const [addRepository] = useMutation(ADD_REPOSITORY);
@@ -186,7 +188,9 @@ const RepositoryList: React.FC = () => {
             comparison = dateB.localeCompare(dateA);
             break;
           case 'addedDate':
-            comparison = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+            const creationDateA = a.createdAt || '';
+            const creationDateB = b.createdAt || '';
+            comparison = creationDateB.localeCompare(creationDateA);
             break;
           case 'status':
             const statusA = a.latestRelease?.seen ? 1 : 0;
@@ -221,7 +225,8 @@ const RepositoryList: React.FC = () => {
   const handleMarkAsSeen = async (releaseId: string, seen: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const release = selectedRepo?.releases?.find(r => r.id === releaseId) || selectedRepo?.latestRelease;
+      const release =
+        selectedRepo?.releases?.find(r => r.id === releaseId) || selectedRepo?.latestRelease;
       if (!release) return;
 
       await markAsSeen({
@@ -281,6 +286,9 @@ const RepositoryList: React.FC = () => {
                     fragment: gql`
                       fragment RepoWithReleases on Repository {
                         id
+                        name
+                        owner
+                        description
                         latestRelease {
                           id
                           seen
@@ -362,6 +370,9 @@ const RepositoryList: React.FC = () => {
               fragment: gql`
                 fragment FullRepository on Repository {
                   id
+                  name
+                  owner
+                  description
                   releases {
                     id
                     version
@@ -460,85 +471,72 @@ const RepositoryList: React.FC = () => {
     }
   };
 
-  const handleRefreshRepository = async (e: React.MouseEvent) => {
+  const handleRefresh = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const repo = selectedRepo;
-      if (!repo) return;
-
-      await refreshRepository({
-        variables: { id: repo.id },
-        refetchQueries: [{ query: GET_REPOSITORIES }],
+      const { data } = await refreshRepository({
+        variables: { id: selectedRepo?.id },
         update: (cache, { data }) => {
-          if (data?.refreshRepository) {
-            const updatedRepo = {
-              ...data.refreshRepository,
-              __typename: 'Repository'
-            };
+          if (!data?.refreshRepository) return;
 
-            cache.writeFragment({
-              id: cache.identify({ __typename: 'Repository', id: repo.id }),
-              fragment: gql`
-                fragment RefreshedRepository on Repository {
+          cache.writeFragment({
+            id: cache.identify({ __typename: 'Repository', id: data.refreshRepository.id }),
+            fragment: gql`
+              fragment RefreshedRepo on Repository {
+                id
+                latestRelease {
                   id
+                  version
                   name
-                  owner
                   description
-                  isArchived
-                  latestRelease {
-                    id
-                    version
-                    name
-                    description
-                    releaseDate
-                    githubId
-                    seen
-                    metadata {
-                      htmlUrl
-                      tarballUrl
-                      zipballUrl
-                      draft
-                      prerelease
-                    }
-                  }
-                  releases {
-                    id
-                    version
-                    name
-                    description
-                    releaseDate
-                    githubId
-                    seen
-                    metadata {
-                      htmlUrl
-                      tarballUrl
-                      zipballUrl
-                      draft
-                      prerelease
-                    }
+                  releaseDate
+                  githubId
+                  seen
+                  metadata {
+                    htmlUrl
+                    tarballUrl
+                    zipballUrl
+                    draft
+                    prerelease
                   }
                 }
-              `,
-              data: updatedRepo,
-            });
+                releases {
+                  id
+                  version
+                  name
+                  description
+                  releaseDate
+                  githubId
+                  seen
+                  metadata {
+                    htmlUrl
+                    tarballUrl
+                    zipballUrl
+                    draft
+                    prerelease
+                  }
+                }
+              }
+            `,
+            data: data.refreshRepository,
+          });
 
-            setSelectedRepo(updatedRepo);
-            if (updatedRepo.latestRelease) {
-              setSelectedRelease(updatedRepo.latestRelease);
-            }
+          if (selectedRepo?.id === data.refreshRepository.id) {
+            setSelectedRepo(data.refreshRepository);
+            setSelectedRelease(data.refreshRepository.latestRelease || null);
           }
-        }
+        },
       });
 
       setSnackbar({
         open: true,
-        message: 'Repository refreshed from GitHub',
+        message: 'Repository refreshed successfully',
         severity: 'success',
       });
     } catch (error) {
       setSnackbar({
         open: true,
-        message: error instanceof Error ? error.message : 'Error refreshing repository',
+        message: 'Error refreshing repository',
         severity: 'error',
       });
     }
@@ -572,10 +570,8 @@ const RepositoryList: React.FC = () => {
     if (!repo.releases || repo.releases.length === 0) return null;
 
     const sortedReleases = [...repo.releases].sort((a, b) => {
-      const dateA = new Date(a.releaseDate).getTime();
-      const dateB = new Date(b.releaseDate).getTime();
-      if (isNaN(dateA) || isNaN(dateB)) return 0;
-      return dateB - dateA;
+      if (!a.releaseDate || !b.releaseDate) return 0;
+      return Number(b.releaseDate) - Number(a.releaseDate);
     });
 
     return (
@@ -677,7 +673,12 @@ const RepositoryList: React.FC = () => {
   );
 
   const renderRepositoryButtons = (repo: Repository) => (
-    <ActionButtons repo={repo} onMarkAsSeen={handleMarkAsSeen} onRefresh={handleRefreshRepository} onDelete={handleDeleteRepository} />
+    <ActionButtons
+      repo={repo}
+      onMarkAsSeen={handleMarkAsSeen}
+      onRefresh={handleRefresh}
+      onDelete={handleDeleteRepository}
+    />
   );
 
   if (loading) {
@@ -749,14 +750,14 @@ const RepositoryList: React.FC = () => {
           <Box display="flex" gap={2} alignItems="center">
             <StyledTextField
               fullWidth
-              placeholder="Enter GitHub repository URL to track"
+              placeholder="Enter GitHub repository URL to track ( ctrl + / )"
               value={repoUrl}
               onChange={e => setRepoUrl(e.target.value)}
               inputRef={repoInputRef}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <GitHubIcon sx={{ color: 'grey.400', ml: 1 }} />
+                    <GitHubIcon sx={{ color: 'grey.400' }} />
                   </InputAdornment>
                 ),
               }}
@@ -779,7 +780,7 @@ const RepositoryList: React.FC = () => {
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon sx={{ color: 'grey.400', ml: 1 }} />
+                    <SearchIcon sx={{ color: 'grey.400' }} />
                   </InputAdornment>
                 ),
                 endAdornment: searchQuery && (
@@ -819,7 +820,7 @@ const RepositoryList: React.FC = () => {
                 const isSelected = selectedRepo?.id === repo.id;
                 return (
                   <React.Fragment key={repo.id}>
-                    <ListItem id={`repo-${repo.id}`} disablePadding>
+                    <ListItem id={`repo-${repo.id}`} disablePadding={true}>
                       <StyledListItemButton
                         selected={isSelected}
                         onClick={() => {

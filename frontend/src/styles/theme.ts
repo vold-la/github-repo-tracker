@@ -123,8 +123,7 @@ export const theme = createTheme({
     MuiListItem: {
       styleOverrides: {
         root: {
-          paddingTop: 12,
-          paddingBottom: 12,
+          padding: 0,
         },
       },
     },
@@ -200,4 +199,4 @@ export const theme = createTheme({
       },
     },
   },
-}); 
+});

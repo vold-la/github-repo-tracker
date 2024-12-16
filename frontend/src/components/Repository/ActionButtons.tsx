@@ -1,9 +1,5 @@
 import React from 'react';
-import {
-  Box,
-  IconButton,
-  Tooltip,
-} from '@mui/material';
+import { Box, IconButton, Tooltip } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,
   RadioButtonUnchecked as UnseenIcon,
@@ -27,7 +23,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
   onDelete,
 }) => {
   return (
-    <Box display="flex" gap={1}>
+    <Box display="flex" sx={{ gap: { xs: 1, sm: 1, md: 0 } }}>
       {repo.latestRelease && (
         <Tooltip title={repo.latestRelease.seen ? 'Mark as unseen' : 'Mark as seen'}>
           <IconButton

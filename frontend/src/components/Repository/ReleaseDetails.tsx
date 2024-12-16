@@ -1,10 +1,5 @@
 import React from 'react';
-import {
-  Box,
-  Typography,
-  IconButton,
-  Tooltip,
-} from '@mui/material';
+import { Box, Typography, IconButton, Tooltip } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,
   RadioButtonUnchecked as UnseenIcon,
@@ -21,17 +16,17 @@ interface ReleaseDetailsProps {
   markdownComponents?: any;
 }
 
-const ReleaseDetails: React.FC<ReleaseDetailsProps> = ({ 
-  release, 
+const ReleaseDetails: React.FC<ReleaseDetailsProps> = ({
+  release,
   onMarkAsSeen,
-  markdownComponents 
+  markdownComponents,
 }) => {
   return (
     <Box
       sx={{
         backgroundColor: 'grey.50',
         borderRadius: 2,
-        p: 3,
+        p: { xs: 0, sm: 3 },
         mb: 4,
       }}
     >
