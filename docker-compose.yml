@@ -9,10 +9,6 @@ services:
       - "3005:3005"
     depends_on:
       - backend
-    environment:
-      - PORT=3005
-      - REACT_APP_GRAPHQL_URL=http://localhost:4005/graphql
-      - WDS_SOCKET_PORT=0
     networks:
       - app-network
 

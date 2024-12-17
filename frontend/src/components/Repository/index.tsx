@@ -484,6 +484,14 @@ const RepositoryList: React.FC = () => {
             fragment: gql`
               fragment RefreshedRepo on Repository {
                 id
+                name
+                owner
+                description
+                fullName
+                githubId
+                isArchived
+                createdAt
+                updatedAt
                 latestRelease {
                   id
                   version
@@ -520,6 +528,21 @@ const RepositoryList: React.FC = () => {
             `,
             data: data.refreshRepository,
           });
+
+          const existingData = cache.readQuery<{ repositories: Repository[] }>({
+            query: GET_REPOSITORIES,
+          });
+
+          if (existingData) {
+            cache.writeQuery({
+              query: GET_REPOSITORIES,
+              data: {
+                repositories: existingData.repositories.map(repo =>
+                  repo.id === data.refreshRepository.id ? data.refreshRepository : repo
+                ),
+              },
+            });
+          }
 
           if (selectedRepo?.id === data.refreshRepository.id) {
             setSelectedRepo(data.refreshRepository);

@@ -38,10 +38,7 @@ export class GitHubService {
     try {
       const { owner, repo } = await this.parseRepositoryUrl(url);
 
-      const { data: repoData } = await this.octokit.repos.get({
-        owner,
-        repo,
-      });
+      const { data: repoData } = await this.octokit.repos.get({ owner, repo });
 
       const existingRepo = await this.dataSource.manager.findOne(Repository, {
         where: { githubId: repoData.id },
@@ -52,22 +49,23 @@ export class GitHubService {
         throw new Error(`Repository ${owner}/${repo} is already in your watch list`);
       }
 
-      const repository = new Repository();
-      repository.name = repoData.name;
-      repository.owner = repoData.owner.login;
-      repository.description = repoData.description || '';
-      repository.fullName = repoData.full_name;
-      repository.githubId = repoData.id;
-      repository.isArchived = repoData.archived;
+      return await this.dataSource.transaction(async transactionalEntityManager => {
+        const repository = new Repository();
+        repository.name = repoData.name;
+        repository.owner = repoData.owner.login;
+        repository.description = repoData.description || '';
+        repository.fullName = repoData.full_name;
+        repository.githubId = repoData.id;
+        repository.isArchived = repoData.archived;
 
-      await this.dataSource.manager.save(repository);
+        const savedRepo = await transactionalEntityManager.save(repository);
+        await this.fetchAndSaveReleases(savedRepo, transactionalEntityManager);
 
-      await this.fetchAndSaveReleases(repository);
-
-      return await this.dataSource.manager.findOne(Repository, {
-        where: { id: repository.id },
-        relations: ['releases'],
-      }) as Repository;
+        return await transactionalEntityManager.findOne(Repository, {
+          where: { id: savedRepo.id },
+          relations: ['releases'],
+        }) as Repository;
+      });
     } catch (error) {
       if (error instanceof Error) {
         throw error;
@@ -76,14 +74,35 @@ export class GitHubService {
     }
   }
 
-  async fetchAndSaveReleases(repository: Repository): Promise<void> {
+  async fetchAndSaveReleases(
+    repository: Repository,
+    transactionalEntityManager?: typeof this.dataSource.manager
+  ): Promise<void> {
     try {
-      const { data: releases } = await this.octokit.repos.listReleases({
+      interface ReleaseResponse {
+        data: Array<{
+          id: number;
+          tag_name: string;
+          name: string | null;
+          body: string | null;
+          published_at: string | null;
+          created_at: string;
+          html_url: string;
+          tarball_url: string | null;
+          zipball_url: string | null;
+          draft: boolean;
+          prerelease: boolean;
+        }>;
+      }
+
+      const response = await this.octokit.repos.listReleases({
         owner: repository.owner,
         repo: repository.name,
-      });
+      }) as ReleaseResponse;
 
-      for (const releaseData of releases) {
+      if (response.data.length === 0) return;
+
+      const releasesToSave = response.data.map(releaseData => {
         const release = new Release();
         release.version = releaseData.tag_name;
         release.name = releaseData.name || releaseData.tag_name;
@@ -98,9 +117,11 @@ export class GitHubService {
           draft: releaseData.draft,
           prerelease: releaseData.prerelease,
         };
+        return release;
+      });
 
-        await this.dataSource.manager.save(release);
-      }
+      const manager = transactionalEntityManager || this.dataSource.manager;
+      await manager.save(Release, releasesToSave);
     } catch (error) {
       console.error('Error fetching releases:', error);
       throw new Error('Failed to fetch repository releases');
@@ -109,27 +130,53 @@ export class GitHubService {
 
   async refreshRepository(repository: Repository): Promise<Repository> {
     try {
-      const { data: repoData } = await this.octokit.repos.get({
-        owner: repository.owner,
-        repo: repository.name,
-      });
+      return await this.dataSource.transaction(async transactionalEntityManager => {
+        interface RepoResponse {
+          data: {
+            description: string | null;
+            archived: boolean;
+          };
+        }
 
-      repository.description = repoData.description || '';
-      repository.isArchived = repoData.archived;
-      await this.dataSource.manager.save(repository);
+        interface ReleaseResponse {
+          data: Array<{
+            id: number;
+            tag_name: string;
+            name: string | null;
+            body: string | null;
+            published_at: string | null;
+            created_at: string;
+            html_url: string;
+            tarball_url: string | null;
+            zipball_url: string | null;
+            draft: boolean;
+            prerelease: boolean;
+          }>;
+        }
 
-      const { data: releases } = await this.octokit.repos.listReleases({
-        owner: repository.owner,
-        repo: repository.name,
-      });
+        const [repoResponse, releasesResponse, existingReleases] = await Promise.all([
+          this.octokit.repos.get({
+            owner: repository.owner,
+            repo: repository.name,
+          }) as Promise<RepoResponse>,
+          this.octokit.repos.listReleases({
+            owner: repository.owner,
+            repo: repository.name,
+          }) as Promise<ReleaseResponse>,
+          transactionalEntityManager.find(Release, {
+            where: { repository: { id: repository.id } },
+          })
+        ]);
 
-      for (const releaseData of releases) {
-        const existingRelease = await this.dataSource.manager.findOne(Release, {
-          where: { githubId: releaseData.id.toString() },
-        });
+        repository.description = repoResponse.data.description || '';
+        repository.isArchived = repoResponse.data.archived;
+        
+        const releasesToSave = releasesResponse.data.map(releaseData => {
+          const existingRelease = existingReleases.find(
+            r => r.githubId === releaseData.id.toString()
+          );
 
-        if (!existingRelease) {
-          const release = new Release();
+          const release = existingRelease || new Release();
           release.version = releaseData.tag_name;
           release.name = releaseData.name || releaseData.tag_name;
           release.description = releaseData.body || '';
@@ -143,12 +190,25 @@ export class GitHubService {
             draft: releaseData.draft,
             prerelease: releaseData.prerelease,
           };
+          return release;
+        });
 
-          await this.dataSource.manager.save(release);
-        }
-      }
+        const currentGithubReleaseIds = releasesResponse.data.map(r => r.id.toString());
+        const releasesToRemove = existingReleases.filter(
+          r => !currentGithubReleaseIds.includes(r.githubId)
+        );
 
-      return repository;
+        await Promise.all([
+          transactionalEntityManager.save(repository),
+          releasesToSave.length > 0 ? transactionalEntityManager.save(Release, releasesToSave) : Promise.resolve(),
+          releasesToRemove.length > 0 ? transactionalEntityManager.remove(releasesToRemove) : Promise.resolve()
+        ]);
+
+        return await transactionalEntityManager.findOne(Repository, {
+          where: { id: repository.id },
+          relations: ['releases'],
+        }) as Repository;
+      });
     } catch (error) {
       console.error('Error refreshing repository:', error);
       throw new Error('Failed to refresh repository');
